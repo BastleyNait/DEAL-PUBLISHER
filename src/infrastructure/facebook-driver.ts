@@ -144,56 +144,55 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       }
     }
     if (!opened) throw new Error(`No encontré el selector "${fieldLabels[0]}" en el formulario.`);
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
 
-    // Intento 1: tipeo directo (funciona en varios combos de Facebook, que
-    // filtran la lista a medida que se escribe).
-    await page.keyboard.type(optionTexts[0]!, { delay: 25 });
-    await page.waitForTimeout(600);
-    const typed = await this.matchOption(page, optionTexts);
-    if (typed) {
-      await typed.click();
-      return;
-    }
-    // No filtró nada usable: se borra lo tipeado para no ensuciar el scroll.
-    await page.keyboard.press("Control+A").catch(() => {});
-    await page.keyboard.press("Backspace").catch(() => {});
-    await page.waitForTimeout(300);
+    // Primer intento real: no asumir ningún rol de accesibilidad puntual.
+    // "role=option" resultó ser el rol equivocado para este menú de Facebook
+    // (la primera corrida real encontró 0 con ese rol aunque la fila estaba
+    // visible en pantalla) — filas de un menú desplegable en apps como esta
+    // suelen ser role=menuitem/menuitemradio, o directamente sin rol y con
+    // un onClick a mano. Este selector cubre los candidatos más comunes.
+    const CANDIDATE_ROLES = '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="button"]';
 
-    // Intento 2: scrollear el listado y juntar todo lo que se va renderizando.
     const seen = new Set<string>();
     let lastCount = -1;
     for (let attempt = 0; attempt < 30; attempt++) {
-      const options = page.getByRole("option");
-      const count = await options.count();
+      const candidates = page.locator(CANDIDATE_ROLES);
+      const count = await candidates.count();
       for (let i = 0; i < count; i++) {
-        const text = (await options.nth(i).innerText().catch(() => "")).trim();
-        if (text) seen.add(text);
+        const text = (await candidates.nth(i).innerText().catch(() => "")).trim();
+        if (!text) continue;
+        seen.add(text);
         for (const wanted of optionTexts) {
           if (new RegExp(wanted, "i").test(text)) {
-            await options.nth(i).click();
+            await candidates.nth(i).scrollIntoViewIfNeeded().catch(() => {});
+            await candidates.nth(i).click();
             return;
           }
         }
       }
-      if (count === lastCount) break; // El scroll dejó de traer opciones nuevas.
+      if (count === lastCount) break; // El scroll dejó de traer filas nuevas.
       lastCount = count;
       await page.mouse.wheel(0, 400);
       await page.waitForTimeout(250);
+    }
+
+    // Último recurso: buscar el texto en cualquier elemento, sin importar
+    // rol ni clase. Más lento y más propenso a pegarle a algo tapado, por
+    // eso va al final y no primero.
+    for (const wanted of optionTexts) {
+      const byText = page.getByText(new RegExp(`^${wanted}$`, "i")).first();
+      if (await byText.count()) {
+        await byText.scrollIntoViewIfNeeded().catch(() => {});
+        await byText.click();
+        return;
+      }
     }
 
     throw new Error(
       `Se abrió "${fieldLabels[0]}" pero ninguna opción coincidió con ${optionTexts.join(" / ")}. ` +
         `Se vieron ${seen.size}: ${[...seen].slice(0, 40).join(" | ")}`,
     );
-  }
-
-  private async matchOption(page: Page, optionTexts: string[]) {
-    for (const text of optionTexts) {
-      const option = page.getByRole("option", { name: new RegExp(text, "i") }).first();
-      if (await option.count()) return option;
-    }
-    return null;
   }
 
   /**
