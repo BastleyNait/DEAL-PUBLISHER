@@ -96,11 +96,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
   }
 
   private async fillForm(page: Page, job: PublishJob, photoPaths: string[]): Promise<void> {
-    if (photoPaths.length > 0) {
-      const fileInput = page.locator('input[type="file"]').first();
-      await fileInput.setInputFiles(photoPaths);
-      await page.waitForTimeout(1000);
-    }
+    if (photoPaths.length > 0) await this.uploadPhotos(page, photoPaths);
 
     await this.fillByLabel(page, ["Title", "Título"], job.title);
     await this.fillByLabel(page, ["Price", "Precio"], String(Math.round(job.priceUsd)));
@@ -127,6 +123,16 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     throw new Error(`No encontré el campo "${labels[0]}" en el formulario de Marketplace.`);
   }
 
+  /**
+   * Categoría y condición no son un <select>: son un listado desplegable que
+   * renderiza de a poco a medida que se scrollea (virtualizado), así que
+   * "Electronics" puede no estar en el DOM todavía cuando se abre el menú,
+   * aunque esté más abajo en la lista. Primero se prueba tipeando (muchos de
+   * estos combos de Facebook filtran al tipear), y si no, se scrollea el
+   * propio listado juntando todo lo que se va viendo hasta que deja de haber
+   * contenido nuevo. Si aun así no aparece, el error lista todo lo que sí se
+   * vio — así el próximo ajuste no necesita otra ronda de captura de pantalla.
+   */
   private async selectFromMenu(page: Page, fieldLabels: string[], optionTexts: string[]): Promise<void> {
     let opened = false;
     for (const label of fieldLabels) {
@@ -138,16 +144,79 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       }
     }
     if (!opened) throw new Error(`No encontré el selector "${fieldLabels[0]}" en el formulario.`);
-
     await page.waitForTimeout(400);
+
+    // Intento 1: tipeo directo (funciona en varios combos de Facebook, que
+    // filtran la lista a medida que se escribe).
+    await page.keyboard.type(optionTexts[0]!, { delay: 25 });
+    await page.waitForTimeout(600);
+    const typed = await this.matchOption(page, optionTexts);
+    if (typed) {
+      await typed.click();
+      return;
+    }
+    // No filtró nada usable: se borra lo tipeado para no ensuciar el scroll.
+    await page.keyboard.press("Control+A").catch(() => {});
+    await page.keyboard.press("Backspace").catch(() => {});
+    await page.waitForTimeout(300);
+
+    // Intento 2: scrollear el listado y juntar todo lo que se va renderizando.
+    const seen = new Set<string>();
+    let lastCount = -1;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const options = page.getByRole("option");
+      const count = await options.count();
+      for (let i = 0; i < count; i++) {
+        const text = (await options.nth(i).innerText().catch(() => "")).trim();
+        if (text) seen.add(text);
+        for (const wanted of optionTexts) {
+          if (new RegExp(wanted, "i").test(text)) {
+            await options.nth(i).click();
+            return;
+          }
+        }
+      }
+      if (count === lastCount) break; // El scroll dejó de traer opciones nuevas.
+      lastCount = count;
+      await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(250);
+    }
+
+    throw new Error(
+      `Se abrió "${fieldLabels[0]}" pero ninguna opción coincidió con ${optionTexts.join(" / ")}. ` +
+        `Se vieron ${seen.size}: ${[...seen].slice(0, 40).join(" | ")}`,
+    );
+  }
+
+  private async matchOption(page: Page, optionTexts: string[]) {
     for (const text of optionTexts) {
       const option = page.getByRole("option", { name: new RegExp(text, "i") }).first();
-      if (await option.count()) {
-        await option.click();
-        return;
-      }
+      if (await option.count()) return option;
     }
-    throw new Error(`Se abrió "${fieldLabels[0]}" pero ninguna opción coincidió con ${optionTexts.join(" / ")}.`);
+    return null;
+  }
+
+  /**
+   * Subir varias fotos a la vez tarda unos segundos en procesarse del lado de
+   * Facebook antes de que aparezcan las miniaturas. La primera corrida se
+   * quedó con la captura mostrando casilleros grises: probablemente estaban
+   * subiendo todavía y la captura se tomó muy pronto, no que hayan fallado.
+   * Acá se espera de verdad a que aparezcan miniaturas en vez de una pausa
+   * fija corta.
+   */
+  private async uploadPhotos(page: Page, photoPaths: string[]): Promise<void> {
+    const fileInput = page.locator('input[type="file"]').first();
+    await fileInput.setInputFiles(photoPaths);
+
+    const thumbnails = page.locator('div[aria-label="Thumbnail"], img[src^="blob:"]');
+    for (let waited = 0; waited < 15_000; waited += 500) {
+      if ((await thumbnails.count()) > 0) return;
+      await page.waitForTimeout(500);
+    }
+    console.warn(
+      `Subí ${photoPaths.length} foto(s) pero no vi ninguna miniatura después de 15s. ` +
+        "Puede que Facebook tarde más o que haya cambiado cómo muestra las fotos cargadas — revisá la captura.",
+    );
   }
 
   private async fillLocation(page: Page): Promise<void> {
