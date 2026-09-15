@@ -46,9 +46,33 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
   async post(job: PublishJob): Promise<void> {
     const page = await this.context.newPage();
     this.page = page;
+    // Default de Playwright es 30s por acción: si un campo nunca aparece, se
+    // queda "pegado" 30s por cada uno sin decir nada mientras tanto. Con esto
+    // cada acción individual falla en 10s como mucho, y el log de abajo dice
+    // en cuál estaba antes de fallar.
+    page.setDefaultTimeout(10_000);
+    const step = (label: string) => console.log(`  [${job.itemId}] ${label}`);
 
     try {
-      await page.goto(CREATE_ITEM_URL, { waitUntil: "domcontentloaded" });
+      step("navegando a Marketplace…");
+      try {
+        await page.goto(CREATE_ITEM_URL, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      } catch (err) {
+        throw new Error(`La página no terminó de cargar en 20s (${err instanceof Error ? err.message : err}).`);
+      }
+      await this.screenshot(page, job.itemId, "01-cargada");
+
+      // Si la página cargó casi vacía, seguir a ciegas solo suma varios
+      // timeouts de 10s en fila hasta fallar igual. Se corta acá, ya con la
+      // captura de arriba para ver qué hay (checkpoint, cookies, blanco real).
+      const bodyText = (await page.locator("body").innerText().catch(() => "")).trim();
+      if (bodyText.length < 40) {
+        throw new Error(
+          `La página cargó casi vacía (${bodyText.length} caracteres de texto). ` +
+            "Puede ser un checkpoint de verificación de Facebook, un aviso de cookies tapando todo, o que la sesión no sirve. Mirá la captura.",
+        );
+      }
+      step(`página cargada (${bodyText.length} caracteres de texto, url: ${page.url()})`);
 
       if (await this.looksLoggedOut(page)) {
         throw new Error(
@@ -56,8 +80,10 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
         );
       }
 
+      step("bajando fotos…");
       const photoPaths = await this.downloadPhotos(job.imageUrls, job.itemId);
-      await this.fillForm(page, job, photoPaths);
+      step(`${photoPaths.length}/${job.imageUrls.length} fotos bajadas, llenando el formulario…`);
+      await this.fillForm(page, job, photoPaths, step);
 
       const shotPath = await this.screenshot(page, job.itemId, "listo-para-publicar");
 
@@ -73,6 +99,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
         rl.close();
       }
 
+      step("publicando…");
       await this.clickAny(page, ["Next", "Siguiente"]);
       await page.waitForTimeout(1500);
       await this.clickAny(page, ["Publish", "Publicar"]);
@@ -95,19 +122,33 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     return page.url().includes("/login") || (await page.getByLabel(/mobile number|email|correo/i).count()) > 0;
   }
 
-  private async fillForm(page: Page, job: PublishJob, photoPaths: string[]): Promise<void> {
-    if (photoPaths.length > 0) await this.uploadPhotos(page, photoPaths);
+  private async fillForm(
+    page: Page,
+    job: PublishJob,
+    photoPaths: string[],
+    step: (label: string) => void,
+  ): Promise<void> {
+    if (photoPaths.length > 0) {
+      step("subiendo fotos…");
+      await this.uploadPhotos(page, photoPaths);
+    }
 
+    step("campo Título…");
     await this.fillByLabel(page, ["Title", "Título"], job.title);
+    step("campo Precio…");
     await this.fillByLabel(page, ["Price", "Precio"], String(Math.round(job.priceUsd)));
 
     // Categoría y condición son combos/menús, no campos de texto: se abren y
     // se elige la primera opción razonable. Es lo más frágil del formulario.
+    step("menú Categoría…");
     await this.selectFromMenu(page, ["Category", "Categoría"], ["Electronics", "Electrónica", "Electrónicos"]);
+    step("menú Condición…");
     await this.selectFromMenu(page, ["Condition", "Estado", "Condición"], ["Used - Good", "Usado - Bueno", "Used", "Usado"]);
 
+    step("campo Descripción…");
     await this.fillByLabel(page, ["Description", "Descripción"], job.description);
 
+    step("campo Ubicación…");
     await this.fillLocation(page);
   }
 
@@ -125,13 +166,13 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
 
   /**
    * Categoría y condición no son un <select>: son un listado desplegable que
-   * renderiza de a poco a medida que se scrollea (virtualizado), así que
-   * "Electronics" puede no estar en el DOM todavía cuando se abre el menú,
-   * aunque esté más abajo en la lista. Primero se prueba tipeando (muchos de
-   * estos combos de Facebook filtran al tipear), y si no, se scrollea el
-   * propio listado juntando todo lo que se va viendo hasta que deja de haber
-   * contenido nuevo. Si aun así no aparece, el error lista todo lo que sí se
-   * vio — así el próximo ajuste no necesita otra ronda de captura de pantalla.
+   * (a) renderiza de a poco a medida que se scrollea (virtualizado) y (b) no
+   * usa role="option" como cabría esperar — la primera corrida real encontró
+   * 0 filas con ese rol aunque estaban visibles en pantalla. Por eso se
+   * prueba contra varios roles candidatos mientras se scrollea el propio
+   * listado, y si ninguno pega, un último intento por texto puro sin importar
+   * el rol. Si aun así no aparece, el error lista todo lo que sí se vio — así
+   * el próximo ajuste no necesita otra ronda de captura de pantalla.
    */
   private async selectFromMenu(page: Page, fieldLabels: string[], optionTexts: string[]): Promise<void> {
     let opened = false;

@@ -61,10 +61,24 @@ la columna `facebook_error` — no vuelve a la cola solo; si lo arreglás, un
 `update publications set facebook_status = 'queued' where item_id = '...'` lo
 vuelve a poner en fila.
 
-## Si un selector se rompió
+## Depurar cuando algo se traba o falla
+
+La terminal va imprimiendo en qué paso está (`navegando…`, `campo Título…`,
+`menú Categoría…`, etc.) — si parece "pegado", mirá la última línea impresa:
+esa acción falla sola en 10 segundos como mucho, no se cuelga para siempre.
+
+`runs/` va quedando con capturas en cada corrida:
+- `NNN-01-cargada-*.png`: cómo se ve la página apenas navega a Marketplace.
+  Si acá ya se ve en blanco o pide algo raro, es un problema de Facebook
+  (checkpoint de verificación, aviso de cookies tapando todo, sesión vencida
+  — corré `npm run login` de nuevo), no del código.
+- `NNN-listo-para-publicar-*.png`: el formulario ya completo, antes de tocar
+  publicar.
+- `NNN-error-*.png`: dónde se frenó si algo falló.
 
 Facebook cambia el formulario de Marketplace seguido. `facebook-driver.ts`
 busca los campos por rol/etiqueta accesible (`getByLabel`, `getByRole`) en vez
 de clases CSS, que es lo más estable que hay, pero no es inmune a cambios.
-Con `FB_DRY_RUN=true`, corré `npm start`, mirá la captura en `runs/` del paso
-que falló, y ajustá el selector de ese paso puntual en `fillForm`.
+Con `FB_DRY_RUN=true`, corré `npm start`, mirá la captura del paso que falló
+y el mensaje de error (para categoría/condición, lista lo que sí encontró) y
+ajustá el selector de ese paso puntual en `fillForm`.
