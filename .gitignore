@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.local
+*.local
+.DS_Store
+*.tsbuildinfo
+
+# Sesión de Facebook (chromium.launchPersistentContext). Es literalmente tu
+# login guardado — nunca se sube a ningún lado.
+.fb-session/
+
+# Capturas de pantalla de jobs fallidos (ver facebook-driver.ts). Pueden
+# mostrar tu perfil de Facebook o el contenido de la publicación.
+runs/

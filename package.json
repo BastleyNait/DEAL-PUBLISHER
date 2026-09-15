@@ -1,0 +1,25 @@
+{
+  "name": "deal-publisher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Worker local que toma publicaciones en cola y las postea en Facebook Marketplace con Playwright, usando tu propia sesión de Facebook en tu PC.",
+  "type": "module",
+  "scripts": {
+    "login": "tsx src/login.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.47.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
