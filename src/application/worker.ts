@@ -25,7 +25,16 @@ export class PublishWorker {
   async drainQueue(): Promise<number> {
     let processed = 0;
     for (;;) {
-      const job = await this.queue.claimNext();
+      let job;
+      try {
+        job = await this.queue.claimNext();
+      } catch (err) {
+        // Un corte de red o un hiccup de Supabase no puede tirar abajo el
+        // proceso entero: se loguea y se reintenta en la próxima vuelta, en
+        // vez de que el worker quede muerto hasta que alguien lo reinicie.
+        console.error("No se pudo consultar la cola, reintento en la próxima vuelta:", err);
+        return processed;
+      }
       if (!job) return processed;
 
       console.log(`Publicando ${job.itemId} — ${job.title}`);
