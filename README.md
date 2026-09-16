@@ -52,14 +52,21 @@ npm start
 Revisa la cola (tabla `publications`, columna `facebook_status = 'queued'`)
 cada `POLL_INTERVAL_SECONDS`. Por cada publicación pendiente: abre una pestaña,
 llena el formulario, y — con `FB_CONFIRM_BEFORE_POST=true` (default) — espera
-que apretés Enter en la terminal antes de tocar el botón de publicar. Con
-`FB_DRY_RUN=true` llena el formulario y para ahí, sin publicar nada; sirve
-para ajustar selectores sin arriesgarte.
+en la terminal: **Enter** publica, **`n` + Enter** saltea ese ítem sin
+publicarlo (queda `failed` con motivo "Salteado a mano"). Con `FB_DRY_RUN=true`
+llena el formulario y para ahí, sin publicar nada; sirve para ajustar
+selectores sin arriesgarte.
 
-`Ctrl+C` para parar. Un job que falla queda marcado `failed` con el motivo en
-la columna `facebook_error` — no vuelve a la cola solo; si lo arreglás, un
-`update publications set facebook_status = 'queued' where item_id = '...'` lo
-vuelve a poner en fila.
+`Ctrl+C` corta el proceso entero (navegador incluido), en cualquier momento —
+usalo solo para salir de todo, no para saltear un ítem puntual: si lo apretás
+mientras hay otros jobs por procesar en la misma pasada, esos van a fallar con
+"el navegador ya se cerró" porque el contexto se cae con el proceso. Para
+saltear uno sin cortar todo, usá `n` + Enter en el prompt de confirmación.
+
+Un job que falla queda marcado `failed` con el motivo en la columna
+`facebook_error` — no vuelve a la cola solo; si lo arreglás (o solo lo
+salteaste), un `update publications set facebook_status = 'queued' where
+item_id = '...'` lo vuelve a poner en fila.
 
 ## Depurar cuando algo se traba o falla
 

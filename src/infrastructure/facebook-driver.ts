@@ -35,6 +35,7 @@ export async function launchFacebookContext(headless: boolean): Promise<BrowserC
  */
 export class FacebookMarketplaceDriver implements MarketplaceDriver {
   private page: Page | null = null;
+  private closed = false;
 
   constructor(
     private readonly context: BrowserContext,
@@ -44,6 +45,12 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
   ) {}
 
   async post(job: PublishJob): Promise<void> {
+    // Puede pasar que close() ya haya corrido (se pidió salir) mientras este
+    // job estaba en el aire — mejor un mensaje claro acá que el genérico de
+    // Playwright ("Target page, context or browser has been closed") más
+    // abajo si se intenta igual abrir una pestaña en un contexto muerto.
+    if (this.closed) throw new Error("El navegador ya se cerró (se pidió salir); este ítem no se procesó.");
+
     const page = await this.context.newPage();
     this.page = page;
     // Default de Playwright es 30s por acción: si un campo nunca aparece, se
@@ -95,8 +102,17 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       if (this.confirmBeforePost) {
         console.log(`Formulario completo. Revisá la ventana del navegador (o ${shotPath}).`);
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        await rl.question("Presioná Enter para publicar, o Ctrl+C para cancelar este item... ");
+        // Saltear se escribe, no se hace con Ctrl+C: esa tecla es SIGINT, mata
+        // el proceso entero (y el navegador con él) mientras el resto de la
+        // cola sigue procesándose — cada job siguiente chocaba contra un
+        // navegador ya cerrado ("Target page, context or browser has been
+        // closed"). Ctrl+C sigue sirviendo para salir de todo, como dice el
+        // log de arranque, pero ya no como forma de saltear uno solo.
+        const answer = await rl.question("Enter para publicar, 'n' + Enter para saltear este ítem... ");
         rl.close();
+        if (answer.trim().toLowerCase().startsWith("n")) {
+          throw new Error("Salteado a mano desde la terminal.");
+        }
       }
 
       step("publicando…");
@@ -115,6 +131,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     await this.context.close();
   }
 
