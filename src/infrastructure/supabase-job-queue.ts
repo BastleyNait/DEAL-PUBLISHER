@@ -7,6 +7,7 @@ interface PublicationRow {
   title: string;
   description: string;
   price_usd: string | number;
+  price_pen: string | number | null;
   currency: string;
   image_urls: string[];
 }
@@ -26,7 +27,7 @@ export class SupabaseJobQueue implements JobQueue {
   async claimNext(): Promise<PublishJob | null> {
     const { data, error } = await this.supabase
       .from("publications")
-      .select("item_id, ebay_url, title, description, price_usd, currency, image_urls")
+      .select("item_id, ebay_url, title, description, price_usd, price_pen, currency, image_urls")
       .eq("facebook_status", "queued")
       .order("created_at", { ascending: true })
       .limit(1)
@@ -42,6 +43,9 @@ export class SupabaseJobQueue implements JobQueue {
       title: row.title,
       description: row.description,
       priceUsd: Number(row.price_usd),
+      // Fallback por si alguna fila quedó sin migrar: mejor un tipo de cambio
+      // aproximado que mandar dólares al campo de precio de Facebook.
+      pricePen: row.price_pen != null ? Number(row.price_pen) : Math.round(Number(row.price_usd) * 3.7),
       currency: row.currency,
       imageUrls: row.image_urls ?? [],
     };

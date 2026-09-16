@@ -5,6 +5,8 @@ export interface PublishJob {
   title: string;
   description: string;
   priceUsd: number;
+  /** Precio en soles: es el que va en el campo Price de Facebook, no priceUsd (la cuenta está en Perú). */
+  pricePen: number;
   currency: string;
   imageUrls: string[];
 }

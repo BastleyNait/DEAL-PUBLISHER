@@ -117,9 +117,9 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
 
       step("publicando…");
       await this.clickAny(page, ["Next", "Siguiente"]);
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(800);
       await this.clickAny(page, ["Publish", "Publicar"]);
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(1200);
     } catch (err) {
       const shotPath = await this.screenshot(page, job.itemId, "error").catch(() => null);
       const suffix = shotPath ? ` Captura: ${shotPath}` : "";
@@ -153,7 +153,10 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     step("campo Título…");
     await this.fillByLabel(page, ["Title", "Título"], job.title);
     step("campo Precio…");
-    await this.fillByLabel(page, ["Price", "Precio"], String(Math.round(job.priceUsd)));
+    // pricePen, no priceUsd: la cuenta de Facebook está en Perú, así que el
+    // campo Precio se muestra y se interpreta en soles. Cargar el número en
+    // dólares ahí lo vendía a un tercio de su precio real.
+    await this.fillByLabel(page, ["Price", "Precio"], String(Math.round(job.pricePen)));
 
     // Categoría y condición son combos/menús, no campos de texto: se abren y
     // se elige la primera opción razonable. Es lo más frágil del formulario.
@@ -202,7 +205,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       }
     }
     if (!opened) throw new Error(`No encontré el selector "${fieldLabels[0]}" en el formulario.`);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(300);
 
     // Primer intento real: no asumir ningún rol de accesibilidad puntual.
     // "role=option" resultó ser el rol equivocado para este menú de Facebook
@@ -232,7 +235,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       if (count === lastCount) break; // El scroll dejó de traer filas nuevas.
       lastCount = count;
       await page.mouse.wheel(0, 400);
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(150);
     }
 
     // Último recurso: buscar el texto en cualquier elemento, sin importar
@@ -266,12 +269,12 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     await fileInput.setInputFiles(photoPaths);
 
     const thumbnails = page.locator('div[aria-label="Thumbnail"], img[src^="blob:"]');
-    for (let waited = 0; waited < 15_000; waited += 500) {
+    for (let waited = 0; waited < 10_000; waited += 300) {
       if ((await thumbnails.count()) > 0) return;
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(300);
     }
     console.warn(
-      `Subí ${photoPaths.length} foto(s) pero no vi ninguna miniatura después de 15s. ` +
+      `Subí ${photoPaths.length} foto(s) pero no vi ninguna miniatura después de 10s. ` +
         "Puede que Facebook tarde más o que haya cambiado cómo muestra las fotos cargadas — revisá la captura.",
     );
   }
@@ -281,7 +284,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     if (!(await field.count())) return; // No siempre está: a veces ya viene precargada.
     await field.click();
     await field.fill(this.location);
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(400);
     const suggestion = page.getByRole("option").first();
     if (await suggestion.count()) await suggestion.click();
   }
