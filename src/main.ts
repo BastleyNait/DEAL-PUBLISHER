@@ -76,14 +76,27 @@ const pollIntervalMs = Number(process.env.POLL_INTERVAL_SECONDS ?? "30") * 1000;
 const context = await launchFacebookContext(false);
 const driver = new FacebookMarketplaceDriver(context, location, dryRun, confirmBeforePost, reporter);
 
-process.on("SIGINT", async () => {
-  console.log("\nCerrando...");
-  // El estado primero: el dashboard pasa a "apagado" al toque en vez de
-  // esperar a que venza el latido.
-  await reporter.stop();
-  await driver.close();
+let shuttingDown = false;
+async function shutdown(message: string): Promise<never> {
+  if (!shuttingDown) {
+    shuttingDown = true;
+    console.log(message);
+    // El estado primero: el dashboard pasa a "apagado" al toque en vez de
+    // esperar a que venza el latido.
+    await reporter.stop();
+    await driver.close().catch(() => {});
+  }
   process.exit(0);
-});
+}
+
+process.on("SIGINT", () => void shutdown("\nCerrando..."));
+
+// Si se cierra la ventana de Chromium, el contexto muere pero este proceso
+// seguiría vivo: latiendo "en línea" y marcando cada job como fallido al
+// instante ("browser has been closed"). Mejor apagarse: el dashboard pasa a
+// "apagado" y el botón Iniciar lo enciende de nuevo. El job que estaba en el
+// aire sigue 'queued' (solo se marca al terminar), así que se reintenta solo.
+context.on("close", () => void shutdown("\nSe cerró la ventana del navegador. Apago el publicador."));
 
 const worker = new PublishWorker(queue, driver, pollIntervalMs, reporter);
 await worker.runForever();
