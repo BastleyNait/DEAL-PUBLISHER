@@ -1,4 +1,4 @@
-import type { JobQueue, MarketplaceDriver } from "../domain/types.js";
+import type { JobQueue, MarketplaceDriver, StatusReporter } from "../domain/types.js";
 
 /**
  * Bucle: pedir el siguiente job en cola, postearlo, marcar el resultado,
@@ -11,6 +11,7 @@ export class PublishWorker {
     private readonly queue: JobQueue,
     private readonly driver: MarketplaceDriver,
     private readonly pollIntervalMs: number,
+    private readonly reporter?: StatusReporter,
   ) {}
 
   async runForever(): Promise<never> {
@@ -38,6 +39,7 @@ export class PublishWorker {
       if (!job) return processed;
 
       console.log(`Publicando ${job.itemId} — ${job.title}`);
+      this.reporter?.set("working", { itemId: job.itemId, title: job.title });
       try {
         await this.driver.post(job);
         await this.queue.markPosted(job.itemId);
@@ -46,6 +48,8 @@ export class PublishWorker {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`❌ ${job.itemId} falló: ${message}`);
         await this.queue.markFailed(job.itemId, message);
+      } finally {
+        this.reporter?.set("idle");
       }
       processed++;
     }

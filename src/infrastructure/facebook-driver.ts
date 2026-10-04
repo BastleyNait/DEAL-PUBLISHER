@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import readline from "node:readline/promises";
 import { type BrowserContext, type Page, chromium } from "playwright";
-import type { MarketplaceDriver, PublishJob } from "../domain/types.js";
+import type { MarketplaceDriver, PublishJob, StatusReporter } from "../domain/types.js";
+import { type Decision, confirmInBrowser } from "./confirm-overlay.js";
 
 const CREATE_ITEM_URL = "https://www.facebook.com/marketplace/create/item";
 const RUNS_DIR = join(process.cwd(), "runs");
@@ -42,6 +43,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     private readonly location: string,
     private readonly dryRun: boolean,
     private readonly confirmBeforePost: boolean,
+    private readonly reporter?: StatusReporter,
   ) {}
 
   async post(job: PublishJob): Promise<void> {
@@ -101,18 +103,10 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
 
       if (this.confirmBeforePost) {
         console.log(`Formulario completo. Revisá la ventana del navegador (o ${shotPath}).`);
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        // Saltear se escribe, no se hace con Ctrl+C: esa tecla es SIGINT, mata
-        // el proceso entero (y el navegador con él) mientras el resto de la
-        // cola sigue procesándose — cada job siguiente chocaba contra un
-        // navegador ya cerrado ("Target page, context or browser has been
-        // closed"). Ctrl+C sigue sirviendo para salir de todo, como dice el
-        // log de arranque, pero ya no como forma de saltear uno solo.
-        const answer = await rl.question("Enter para publicar, 'n' + Enter para saltear este ítem... ");
-        rl.close();
-        if (answer.trim().toLowerCase().startsWith("n")) {
-          throw new Error("Salteado a mano desde la terminal.");
-        }
+        this.reporter?.set("waiting_confirm", { itemId: job.itemId, title: job.title });
+        const decision = await this.askConfirmation(page, job);
+        this.reporter?.set("working", { itemId: job.itemId, title: job.title });
+        if (decision === "skip") throw new Error("Salteado a mano.");
       }
 
       step("publicando…");
@@ -127,6 +121,25 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     } finally {
       await page.close().catch(() => {});
       this.page = null;
+    }
+  }
+
+  /**
+   * Primero el panel dentro de la ventana de Facebook. Si por lo que sea no se
+   * puede dibujar ahí, se cae a la terminal en vez de publicar sin preguntar
+   * o trabar el job.
+   */
+  private async askConfirmation(page: Page, job: PublishJob): Promise<Decision> {
+    try {
+      return await confirmInBrowser(page, job.title);
+    } catch (err) {
+      console.warn("No pude mostrar el botón en la ventana de Facebook, uso la terminal:", err);
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      // Saltear se escribe, no se hace con Ctrl+C: esa tecla mata el proceso
+      // entero y el navegador con él.
+      const answer = await rl.question("Enter para publicar, 'n' + Enter para saltear este ítem... ");
+      rl.close();
+      return answer.trim().toLowerCase().startsWith("n") ? "skip" : "publish";
     }
   }
 

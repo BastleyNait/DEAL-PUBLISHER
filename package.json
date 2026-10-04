@@ -7,6 +7,8 @@
   "scripts": {
     "login": "tsx src/login.ts",
     "start": "tsx src/main.ts",
+    "install-launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-launcher.ps1",
+    "uninstall-launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall-launcher.ps1",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

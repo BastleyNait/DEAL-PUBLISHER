@@ -8,6 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import { PublishWorker } from "./application/worker.js";
 import { SupabaseJobQueue } from "./infrastructure/supabase-job-queue.js";
 import { FacebookMarketplaceDriver, launchFacebookContext } from "./infrastructure/facebook-driver.js";
+import { SupabaseStatusReporter } from "./infrastructure/supabase-status-reporter.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -53,6 +54,17 @@ await checkSupabaseReachable(supabaseUrl, supabaseServiceRoleKey);
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 const queue = new SupabaseJobQueue(supabase);
 
+// Antes del navegador: si ya hay un publicador corriendo, abrir otro no sirve.
+// Dos Chromium no pueden compartir el perfil con tu sesión de Facebook, y se
+// pisarían la cola. Pasa, por ejemplo, al tocar "Iniciar" en el dashboard con
+// el publicador ya encendido.
+const reporter = new SupabaseStatusReporter(supabase);
+if (!(await reporter.claim())) {
+  console.log("Ya hay un publicador corriendo en esta PC (el dashboard lo ve en línea). No abro otro.");
+  console.log("Si no es así, esperá 30 segundos y volvé a intentar.");
+  process.exit(0);
+}
+
 const dryRun = process.env.FB_DRY_RUN === "true";
 const confirmBeforePost = process.env.FB_CONFIRM_BEFORE_POST !== "false";
 const location = process.env.FB_LOCATION ?? "Lima, Peru";
@@ -62,13 +74,16 @@ const pollIntervalMs = Number(process.env.POLL_INTERVAL_SECONDS ?? "30") * 1000;
 // el patrón que Meta banea. Esto está pensado para correr con la ventana
 // abierta, mirando, no como un servicio de fondo desatendido.
 const context = await launchFacebookContext(false);
-const driver = new FacebookMarketplaceDriver(context, location, dryRun, confirmBeforePost);
+const driver = new FacebookMarketplaceDriver(context, location, dryRun, confirmBeforePost, reporter);
 
 process.on("SIGINT", async () => {
   console.log("\nCerrando...");
+  // El estado primero: el dashboard pasa a "apagado" al toque en vez de
+  // esperar a que venza el latido.
+  await reporter.stop();
   await driver.close();
   process.exit(0);
 });
 
-const worker = new PublishWorker(queue, driver, pollIntervalMs);
+const worker = new PublishWorker(queue, driver, pollIntervalMs, reporter);
 await worker.runForever();
