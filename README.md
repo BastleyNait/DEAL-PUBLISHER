@@ -45,28 +45,57 @@ guardada en `.fb-session/` (nunca se sube a git, ver `.gitignore`).
 
 ## Uso normal
 
+Tres formas de encenderlo, todas equivalentes:
+
+- **Desde el dashboard** (la cómoda): botón **📣 Facebook** → **Iniciar
+  publicador**. Requiere el paso único de abajo.
+- **Doble click** en `Iniciar-Publicador.bat`.
+- `npm start` en una terminal.
+
+### Paso único para que el botón del dashboard funcione
+
 ```bash
-npm start
+npm run install-launcher
 ```
+
+Registra el enlace `revolt-fb://` solo para tu usuario de Windows (no toca
+nada del sistema). Siempre abre el mismo `Iniciar-Publicador.bat` e ignora lo
+que venga después del enlace, así que una página web no puede pasarle nada a
+tu PC. La primera vez, el navegador pregunta si abrir "Publicador de
+Facebook": aceptá y marcá "Permitir siempre". Para sacarlo:
+`npm run uninstall-launcher`.
+
+### Qué hace
 
 Revisa la cola (tabla `publications`, columna `facebook_status = 'queued'`)
 cada `POLL_INTERVAL_SECONDS`. Por cada publicación pendiente: abre una pestaña,
-llena el formulario, y — con `FB_CONFIRM_BEFORE_POST=true` (default) — espera
-en la terminal: **Enter** publica, **`n` + Enter** saltea ese ítem sin
-publicarlo (queda `failed` con motivo "Salteado a mano"). Con `FB_DRY_RUN=true`
-llena el formulario y para ahí, sin publicar nada; sirve para ajustar
-selectores sin arriesgarte.
+llena el formulario, y — con `FB_CONFIRM_BEFORE_POST=true` (default) — te
+muestra **dentro de la ventana de Facebook**, abajo a la derecha, un panel con
+el título y dos botones: **Publicar** o **Saltear** (queda `failed` con motivo
+"Salteado a mano"). Cerrar la pestaña también cuenta como saltear. Si no se
+puede dibujar el panel, cae al prompt de la terminal (Enter publica, `n` +
+Enter saltea). Con `FB_DRY_RUN=true` llena el formulario y para ahí, sin
+publicar nada; sirve para ajustar selectores sin arriesgarte.
 
-`Ctrl+C` corta el proceso entero (navegador incluido), en cualquier momento —
-usalo solo para salir de todo, no para saltear un ítem puntual: si lo apretás
-mientras hay otros jobs por procesar en la misma pasada, esos van a fallar con
-"el navegador ya se cerró" porque el contexto se cae con el proceso. Para
-saltear uno sin cortar todo, usá `n` + Enter en el prompt de confirmación.
+Mientras corre avisa su estado a la tabla `publisher_status` cada 10 s
+(libre / trabajando / esperando tu click); el dashboard lo muestra con un
+punto de color y dice "apagado" si pasan 30 s sin latido. Solo puede haber una
+instancia: dos Chromium no pueden compartir tu sesión de Facebook, así que si
+ya hay uno encendido, el segundo avisa y se cierra.
+
+`Ctrl+C` (o cerrar la ventana de la consola) corta el proceso entero,
+navegador incluido. Ya no hace falta para confirmar nada: usalo solo para
+salir de todo, porque los jobs que falten procesar en esa pasada van a fallar
+con "el navegador ya se cerró".
+
+Las pruebas que no tocan Facebook: `npx tsx scripts/try-overlay.ts` (el panel
+Publicar/Saltear sobre una página local) y `npx tsx scripts/try-reporter.ts`
+(latido y candado contra Supabase).
 
 Un job que falla queda marcado `failed` con el motivo en la columna
 `facebook_error` — no vuelve a la cola solo; si lo arreglás (o solo lo
-salteaste), un `update publications set facebook_status = 'queued' where
-item_id = '...'` lo vuelve a poner en fila.
+salteaste), el botón **Reintentar** del panel Facebook del dashboard lo vuelve
+a poner en fila.
 
 ## Depurar cuando algo se traba o falla
 
