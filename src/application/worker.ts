@@ -41,6 +41,7 @@ export class PublishWorker {
       console.log(`Publicando ${job.itemId} — ${job.title}`);
       this.reporter?.set("working", { itemId: job.itemId, title: job.title });
       try {
+        job = await this.queue.refresh(job);
         await this.driver.post(job);
         await this.queue.markPosted(job.itemId);
         console.log(`✅ ${job.itemId} publicado.`);

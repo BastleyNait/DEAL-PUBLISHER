@@ -15,6 +15,12 @@ export interface PublishJob {
 export interface JobQueue {
   /** El más viejo en cola, o null si no hay nada para postear ahora. */
   claimNext(): Promise<PublishJob | null>;
+  /**
+   * El job con el contenido vigente de revolt-laptops.com (lo editado en
+   * /admin después de publicar). Si falla, el job se marca 'failed' con el
+   * motivo: mejor eso que postear en Facebook un texto que ya corregiste.
+   */
+  refresh(job: PublishJob): Promise<PublishJob>;
   markPosted(itemId: string): Promise<void>;
   markFailed(itemId: string, error: string): Promise<void>;
 }

@@ -12,6 +12,27 @@ interface PublicationRow {
   image_urls: string[];
 }
 
+/** Lo que devuelve la acción facebook-sync: lo vigente en revolt-laptops.com (null = sin cambios). */
+interface FreshContent {
+  title: string;
+  description: string | null;
+  imageUrls: string[] | null;
+  pricePen: number | null;
+}
+
+async function readErrorBody(error: { message: string; context?: unknown }): Promise<string> {
+  const response = error.context;
+  if (response instanceof Response) {
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) return body.error;
+    } catch {
+      // cuerpo no JSON: queda el mensaje genérico
+    }
+  }
+  return error.message;
+}
+
 /**
  * Lee/escribe la tabla `publications` del proyecto de Supabase de DEAL
  * HUNTER — este worker no tiene base propia, comparte esa. Un solo worker
@@ -48,6 +69,26 @@ export class SupabaseJobQueue implements JobQueue {
       pricePen: row.price_pen != null ? Number(row.price_pen) : Math.round(Number(row.price_usd) * 3.7),
       currency: row.currency,
       imageUrls: row.image_urls ?? [],
+    };
+  }
+
+  async refresh(job: PublishJob): Promise<PublishJob> {
+    const { data, error } = await this.supabase.functions.invoke<{ data: FreshContent | null }>("publish-deal", {
+      body: { action: "facebook-sync", itemId: job.itemId },
+    });
+    if (error) {
+      // El cuerpo de la respuesta trae el motivo real ("ya no existe en la tienda", etc.).
+      const detail = await readErrorBody(error);
+      throw new Error(`No se pudo leer el producto actual de la tienda: ${detail}`);
+    }
+    const fresh = data?.data;
+    if (!fresh) return job; // publicación vieja sin producto en la tienda
+    return {
+      ...job,
+      title: fresh.title,
+      description: fresh.description ?? job.description,
+      imageUrls: fresh.imageUrls ?? job.imageUrls,
+      pricePen: fresh.pricePen ?? job.pricePen,
     };
   }
 
