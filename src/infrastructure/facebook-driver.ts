@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import readline from "node:readline/promises";
 import { type BrowserContext, type Page, chromium } from "playwright";
 import type { MarketplaceDriver, PublishJob, StatusReporter } from "../domain/types.js";
@@ -8,6 +8,20 @@ import { type Decision, confirmInBrowser } from "./confirm-overlay.js";
 
 const CREATE_ITEM_URL = "https://www.facebook.com/marketplace/create/item";
 const RUNS_DIR = join(process.cwd(), "runs");
+
+export const COVERS_DIR = join(RUNS_DIR, "covers");
+const COVER_EXTS = [".png", ".jpg", ".jpeg", ".webp"];
+
+/** Nombre base de la portada de un aviso en runs/covers/ (sin extensión). */
+export function coverBase(itemId: string): string {
+  return join(COVERS_DIR, itemId.replace(/[^a-zA-Z0-9]/g, ""));
+}
+
+/** La portada ya preparada con `npm run cover` para este aviso, si hay. */
+export function findCover(itemId: string): string | null {
+  const base = coverBase(itemId);
+  return COVER_EXTS.map((ext) => base + ext).find((path) => existsSync(path)) ?? null;
+}
 
 /**
  * Perfil de Chromium persistente: la sesión de Facebook (cookies, login)
@@ -91,7 +105,9 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
 
       step("bajando fotos…");
       const photoPaths = await this.downloadPhotos(job.imageUrls, job.itemId);
-      step(`${photoPaths.length}/${job.imageUrls.length} fotos bajadas, llenando el formulario…`);
+      step(`${photoPaths.length}/${job.imageUrls.length} fotos bajadas`);
+      await this.addAiCover(job, photoPaths, step);
+      step("llenando el formulario…");
       await this.fillForm(page, job, photoPaths, step);
 
       const shotPath = await this.screenshot(page, job.itemId, "listo-para-publicar");
@@ -322,6 +338,24 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
   }
 
   /** Las fotos ya están en R2 (públicas); se bajan a un temporal porque setInputFiles quiere paths locales. */
+  /**
+   * Si ya preparaste la portada en Gemini (`npm run cover`), va de primera
+   * foto y las originales siguen detrás. Si no hay, el aviso sale con las
+   * fotos de siempre. FB_AI_COVER=false la ignora.
+   */
+  private async addAiCover(job: PublishJob, photoPaths: string[], step: (label: string) => void): Promise<void> {
+    if (process.env.FB_AI_COVER === "false" || photoPaths.length === 0) return;
+    const cover = findCover(job.itemId);
+    if (!cover) {
+      step("sin portada IA (npm run cover para prepararla), van las fotos originales");
+      return;
+    }
+    const local = join(dirname(photoPaths[0]!), `cover${extname(cover)}`);
+    copyFileSync(cover, local);
+    photoPaths.unshift(local);
+    step("portada IA de primera foto");
+  }
+
   private async downloadPhotos(urls: string[], itemId: string): Promise<string[]> {
     const dir = join(tmpdir(), `deal-publisher-${itemId.replace(/[^a-zA-Z0-9]/g, "")}`);
     mkdirSync(dir, { recursive: true });

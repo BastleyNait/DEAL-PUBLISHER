@@ -9,6 +9,7 @@
     "start": "tsx src/main.ts",
     "install-launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-launcher.ps1",
     "uninstall-launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall-launcher.ps1",
+    "cover": "tsx src/cover.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
