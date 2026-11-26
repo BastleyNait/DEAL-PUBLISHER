@@ -57,7 +57,12 @@ function overlayScript(title: string, callbackName: string): string {
  * Facebook puede re-renderizar y llevarse el panel; se vuelve a poner si
  * desaparece. Cerrar la pestaña cuenta como saltear.
  */
-export async function confirmInBrowser(page: Page, title: string): Promise<Decision> {
+export async function confirmInBrowser(
+  page: Page,
+  title: string,
+  /** Si se prende "Auto-publicar" en el dashboard mientras espera, sigue solo. */
+  autoPublish?: () => Promise<boolean>,
+): Promise<Decision> {
   // Nombre único por llamada: exposeFunction falla si se repite en la misma página.
   const callbackName = `__revoltDecide_${Date.now()}`;
   let resolveDecision!: (d: Decision) => void;
@@ -76,6 +81,13 @@ export async function confirmInBrowser(page: Page, title: string): Promise<Decis
       .then((count) => (count === 0 ? page.evaluate(script) : undefined))
       .catch(() => {});
   }, 2000);
+  const autoPoll = autoPublish
+    ? setInterval(() => {
+        void autoPublish()
+          .then((on) => (on ? resolveDecision("publish") : undefined))
+          .catch(() => {});
+      }, 3000)
+    : undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<Decision>((resolve) => {
     timeout = setTimeout(() => resolve("skip"), MAX_WAIT_MS);
@@ -85,6 +97,7 @@ export async function confirmInBrowser(page: Page, title: string): Promise<Decis
     return await Promise.race([decided, timedOut]);
   } finally {
     clearInterval(keepAlive);
+    if (autoPoll) clearInterval(autoPoll);
     if (timeout) clearTimeout(timeout);
     // Sale del medio: si no, tapa el botón de Facebook que viene después.
     await page.evaluate(`document.getElementById(${JSON.stringify(BOX_ID)})?.remove()`).catch(() => {});

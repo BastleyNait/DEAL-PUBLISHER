@@ -100,7 +100,11 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
         return;
       }
 
-      if (this.confirmBeforePost) {
+      // "Auto-publicar" del dashboard: se lee en cada aviso, así se puede
+      // prender y apagar sin reiniciar el publicador.
+      const autoPublish = (await this.reporter?.isAutoPublish()) ?? false;
+      if (autoPublish) step("auto-publicar encendido: publico sin esperar el click");
+      if (this.confirmBeforePost && !autoPublish) {
         console.log(`Formulario completo. Revisá la ventana del navegador (o ${shotPath}).`);
         this.reporter?.set("waiting_confirm", { itemId: job.itemId, title: job.title });
         const decision = await this.askConfirmation(page, job, location);
@@ -130,7 +134,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
    */
   private async askConfirmation(page: Page, job: PublishJob, location: string): Promise<Decision> {
     try {
-      return await confirmInBrowser(page, `📍 ${location} — ${job.title}`);
+      return await confirmInBrowser(page, `📍 ${location} — ${job.title}`, () => this.reporter?.isAutoPublish() ?? Promise.resolve(false));
     } catch (err) {
       console.warn("No pude mostrar el botón en la ventana de Facebook, uso la terminal:", err);
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

@@ -42,6 +42,13 @@ export class SupabaseStatusReporter implements StatusReporter {
     void this.beat();
   }
 
+  async isAutoPublish(): Promise<boolean> {
+    const { data, error } = await this.supabase.from("publisher_status").select("auto_publish").eq("id", 1).maybeSingle();
+    // Ante la duda, preguntar: publicar sin querer es peor que un click de más.
+    if (error) return false;
+    return data?.auto_publish === true;
+  }
+
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;

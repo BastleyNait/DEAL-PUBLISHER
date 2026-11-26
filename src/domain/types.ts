@@ -44,6 +44,8 @@ export interface StatusReporter {
    */
   claim(): Promise<boolean>;
   set(state: PublisherState, job?: { itemId: string; title: string }): void;
+  /** El interruptor "Auto-publicar" del dashboard. Si no se puede leer, false (pedir confirmación). */
+  isAutoPublish(): Promise<boolean>;
   stop(): Promise<void>;
 }
 
