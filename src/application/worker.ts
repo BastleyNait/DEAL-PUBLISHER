@@ -12,6 +12,10 @@ export class PublishWorker {
     private readonly driver: MarketplaceDriver,
     private readonly pollIntervalMs: number,
     private readonly reporter?: StatusReporter,
+    /** Ciudades donde se publica cada laptop, en orden (FB_LOCATIONS). */
+    private readonly locations: string[] = ["Lima, Peru"],
+    /** Pausa entre una ciudad y la siguiente del mismo ítem. */
+    private readonly locationGapMs = 0,
   ) {}
 
   async runForever(): Promise<never> {
@@ -40,13 +44,25 @@ export class PublishWorker {
 
       console.log(`Publicando ${job.itemId} — ${job.title}`);
       this.reporter?.set("working", { itemId: job.itemId, title: job.title });
+      let currentLocation: string | null = null;
       try {
         job = await this.queue.refresh(job);
-        await this.driver.post(job);
+        // Una publicación por ciudad. Las que ya salieron en un intento
+        // anterior se saltan: un reintento nunca repite una ciudad.
+        const pending = this.locations.filter((l) => !job!.postedLocations.includes(l));
+        for (const [i, location] of pending.entries()) {
+          if (i > 0 && this.locationGapMs > 0) await sleep(this.locationGapMs);
+          currentLocation = location;
+          console.log(`  📍 ${location} (${i + 1}/${pending.length})`);
+          await this.driver.post(job, location);
+          await this.queue.markLocationPosted(job.itemId, location);
+        }
+        currentLocation = null;
         await this.queue.markPosted(job.itemId);
-        console.log(`✅ ${job.itemId} publicado.`);
+        console.log(`✅ ${job.itemId} publicado en ${this.locations.join(" · ")}.`);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const raw = err instanceof Error ? err.message : String(err);
+        const message = currentLocation ? `[${currentLocation}] ${raw}` : raw;
         console.error(`❌ ${job.itemId} falló: ${message}`);
         await this.queue.markFailed(job.itemId, message);
       } finally {

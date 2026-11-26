@@ -40,13 +40,12 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
 
   constructor(
     private readonly context: BrowserContext,
-    private readonly location: string,
     private readonly dryRun: boolean,
     private readonly confirmBeforePost: boolean,
     private readonly reporter?: StatusReporter,
   ) {}
 
-  async post(job: PublishJob): Promise<void> {
+  async post(job: PublishJob, location: string): Promise<void> {
     // Puede pasar que close() ya haya corrido (se pidió salir) mientras este
     // job estaba en el aire — mejor un mensaje claro acá que el genérico de
     // Playwright ("Target page, context or browser has been closed") más
@@ -92,7 +91,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       step("bajando fotos…");
       const photoPaths = await this.downloadPhotos(job.imageUrls, job.itemId);
       step(`${photoPaths.length}/${job.imageUrls.length} fotos bajadas, llenando el formulario…`);
-      await this.fillForm(page, job, photoPaths, step);
+      await this.fillForm(page, job, photoPaths, step, location);
 
       const shotPath = await this.screenshot(page, job.itemId, "listo-para-publicar");
 
@@ -104,7 +103,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
       if (this.confirmBeforePost) {
         console.log(`Formulario completo. Revisá la ventana del navegador (o ${shotPath}).`);
         this.reporter?.set("waiting_confirm", { itemId: job.itemId, title: job.title });
-        const decision = await this.askConfirmation(page, job);
+        const decision = await this.askConfirmation(page, job, location);
         this.reporter?.set("working", { itemId: job.itemId, title: job.title });
         if (decision === "skip") throw new Error("Salteado a mano.");
       }
@@ -129,9 +128,9 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
    * puede dibujar ahí, se cae a la terminal en vez de publicar sin preguntar
    * o trabar el job.
    */
-  private async askConfirmation(page: Page, job: PublishJob): Promise<Decision> {
+  private async askConfirmation(page: Page, job: PublishJob, location: string): Promise<Decision> {
     try {
-      return await confirmInBrowser(page, job.title);
+      return await confirmInBrowser(page, `📍 ${location} — ${job.title}`);
     } catch (err) {
       console.warn("No pude mostrar el botón en la ventana de Facebook, uso la terminal:", err);
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -157,6 +156,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     job: PublishJob,
     photoPaths: string[],
     step: (label: string) => void,
+    location: string,
   ): Promise<void> {
     if (photoPaths.length > 0) {
       step("subiendo fotos…");
@@ -182,7 +182,7 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     await this.fillByLabel(page, ["Description", "Descripción"], job.description);
 
     step("campo Ubicación…");
-    await this.fillLocation(page);
+    await this.fillLocation(page, location);
   }
 
   private async fillByLabel(page: Page, labels: string[], value: string): Promise<void> {
@@ -292,14 +292,30 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     );
   }
 
-  private async fillLocation(page: Page): Promise<void> {
+  /**
+   * Con varias ciudades ya no alcanza con "si no está el campo, queda la que
+   * viene precargada": eso publicaría el mismo aviso dos veces en la misma
+   * ciudad. Si no se puede poner la ciudad pedida, el ítem falla.
+   */
+  private async fillLocation(page: Page, location: string): Promise<void> {
     const field = page.getByLabel(/location|ubicación/i).first();
-    if (!(await field.count())) return; // No siempre está: a veces ya viene precargada.
+    if (!(await field.count())) throw new Error(`No encontré el campo de ubicación para poner ${location}.`);
+    const city = (location.split(",")[0] ?? location).trim();
     await field.click();
-    await field.fill(this.location);
-    await page.waitForTimeout(400);
-    const suggestion = page.getByRole("option").first();
-    if (await suggestion.count()) await suggestion.click();
+    await field.fill(city);
+    // Las sugerencias tardan en llegar; se elige la que nombra la ciudad.
+    const suggestion = page.getByRole("option").filter({ hasText: new RegExp(escapeRegExp(city), "i") }).first();
+    try {
+      await suggestion.waitFor({ timeout: 6000 });
+    } catch {
+      throw new Error(`Facebook no sugirió ninguna ubicación para "${city}".`);
+    }
+    await suggestion.click();
+    await page.waitForTimeout(500);
+    const chosen = await field.inputValue().catch(() => "");
+    if (!new RegExp(escapeRegExp(city), "i").test(chosen)) {
+      throw new Error(`La ubicación quedó en "${chosen}" en vez de ${location}.`);
+    }
   }
 
   private async clickAny(page: Page, texts: string[]): Promise<void> {
@@ -342,4 +358,8 @@ export class FacebookMarketplaceDriver implements MarketplaceDriver {
     }
     return paths;
   }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -9,6 +9,8 @@ export interface PublishJob {
   pricePen: number;
   currency: string;
   imageUrls: string[];
+  /** Ciudades donde ya quedó publicada (si un intento anterior falló a mitad). */
+  postedLocations: string[];
 }
 
 /** Puerto: de dónde salen los jobs pendientes y cómo se marca el resultado. */
@@ -21,6 +23,8 @@ export interface JobQueue {
    * motivo: mejor eso que postear en Facebook un texto que ya corregiste.
    */
   refresh(job: PublishJob): Promise<PublishJob>;
+  /** Anota una ciudad más como publicada, apenas se publica en ella. */
+  markLocationPosted(itemId: string, location: string): Promise<void>;
   markPosted(itemId: string): Promise<void>;
   markFailed(itemId: string, error: string): Promise<void>;
 }
@@ -45,6 +49,7 @@ export interface StatusReporter {
 
 /** Puerto: postear un job en Facebook Marketplace. Un driver por implementación (hoy Playwright). */
 export interface MarketplaceDriver {
-  post(job: PublishJob): Promise<void>;
+  /** Publica el job con esa ubicación en el formulario. */
+  post(job: PublishJob, location: string): Promise<void>;
   close(): Promise<void>;
 }

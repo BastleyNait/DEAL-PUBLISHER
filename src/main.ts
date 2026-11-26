@@ -67,14 +67,21 @@ if (!(await reporter.claim())) {
 
 const dryRun = process.env.FB_DRY_RUN === "true";
 const confirmBeforePost = process.env.FB_CONFIRM_BEFORE_POST !== "false";
-const location = process.env.FB_LOCATION ?? "Lima, Peru";
+// Ciudades separadas por ";" (cada una lleva coma: "Lima, Peru;Arequipa, Peru").
+// FB_LOCATION (una sola) sigue sirviendo si FB_LOCATIONS no está.
+const locations = (process.env.FB_LOCATIONS ?? process.env.FB_LOCATION ?? "Lima, Peru")
+  .split(";")
+  .map((l) => l.trim())
+  .filter(Boolean);
+const locationGapMs = Number(process.env.FB_LOCATION_GAP_SECONDS ?? "30") * 1000;
 const pollIntervalMs = Number(process.env.POLL_INTERVAL_SECONDS ?? "30") * 1000;
+console.log(`Ciudades: ${locations.join(" · ")}`);
 
 // headless: false siempre — un posteo automático e invisible es exactamente
 // el patrón que Meta banea. Esto está pensado para correr con la ventana
 // abierta, mirando, no como un servicio de fondo desatendido.
 const context = await launchFacebookContext(false);
-const driver = new FacebookMarketplaceDriver(context, location, dryRun, confirmBeforePost, reporter);
+const driver = new FacebookMarketplaceDriver(context, dryRun, confirmBeforePost, reporter);
 
 let shuttingDown = false;
 async function shutdown(message: string): Promise<never> {
@@ -98,5 +105,5 @@ process.on("SIGINT", () => void shutdown("\nCerrando..."));
 // aire sigue 'queued' (solo se marca al terminar), así que se reintenta solo.
 context.on("close", () => void shutdown("\nSe cerró la ventana del navegador. Apago el publicador."));
 
-const worker = new PublishWorker(queue, driver, pollIntervalMs, reporter);
+const worker = new PublishWorker(queue, driver, pollIntervalMs, reporter, locations, locationGapMs);
 await worker.runForever();

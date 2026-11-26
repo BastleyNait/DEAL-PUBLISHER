@@ -10,6 +10,7 @@ interface PublicationRow {
   price_pen: string | number | null;
   currency: string;
   image_urls: string[];
+  facebook_posted_locations: string[] | null;
 }
 
 /** Lo que devuelve la acción facebook-sync: lo vigente en revolt-laptops.com (null = sin cambios). */
@@ -48,7 +49,7 @@ export class SupabaseJobQueue implements JobQueue {
   async claimNext(): Promise<PublishJob | null> {
     const { data, error } = await this.supabase
       .from("publications")
-      .select("item_id, ebay_url, title, description, price_usd, price_pen, currency, image_urls")
+      .select("item_id, ebay_url, title, description, price_usd, price_pen, currency, image_urls, facebook_posted_locations")
       .eq("facebook_status", "queued")
       .order("created_at", { ascending: true })
       .limit(1)
@@ -69,6 +70,7 @@ export class SupabaseJobQueue implements JobQueue {
       pricePen: row.price_pen != null ? Number(row.price_pen) : Math.round(Number(row.price_usd) * 3.7),
       currency: row.currency,
       imageUrls: row.image_urls ?? [],
+      postedLocations: row.facebook_posted_locations ?? [],
     };
   }
 
@@ -90,6 +92,24 @@ export class SupabaseJobQueue implements JobQueue {
       imageUrls: fresh.imageUrls ?? job.imageUrls,
       pricePen: fresh.pricePen ?? job.pricePen,
     };
+  }
+
+  async markLocationPosted(itemId: string, location: string): Promise<void> {
+    // Leer y escribir alcanza: hay un solo publicador a la vez (ver
+    // StatusReporter.claim), así que nadie más toca esta fila mientras tanto.
+    const { data, error: readError } = await this.supabase
+      .from("publications")
+      .select("facebook_posted_locations")
+      .eq("item_id", itemId)
+      .single();
+    if (readError) throw new Error(`No se pudo leer las ciudades de ${itemId}: ${readError.message}`);
+    const done: string[] = data?.facebook_posted_locations ?? [];
+    if (done.includes(location)) return;
+    const { error } = await this.supabase
+      .from("publications")
+      .update({ facebook_posted_locations: [...done, location] })
+      .eq("item_id", itemId);
+    if (error) throw new Error(`No se pudo anotar ${location} para ${itemId}: ${error.message}`);
   }
 
   async markPosted(itemId: string): Promise<void> {
